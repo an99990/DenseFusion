@@ -14,7 +14,7 @@ from PIL import Image
 import numpy as np
 import pdb
 import torch.nn.functional as F
-from lib.pspnet import PSPNet
+from DenseFusion.lib.pspnet import PSPNet
 
 psp_models = {
     'resnet18': lambda: PSPNet(sizes=(1, 2, 3, 6), psp_size=512, deep_features_size=256, backend='resnet18'),
@@ -23,6 +23,9 @@ psp_models = {
     'resnet101': lambda: PSPNet(sizes=(1, 2, 3, 6), psp_size=2048, deep_features_size=1024, backend='resnet101'),
     'resnet152': lambda: PSPNet(sizes=(1, 2, 3, 6), psp_size=2048, deep_features_size=1024, backend='resnet152')
 }
+
+import logging
+log = logging.getLogger("my-logger")
 
 class ModifiedResnet(nn.Module):
 
@@ -54,7 +57,6 @@ class PoseNetFeat(nn.Module):
         x = F.relu(self.conv1(x))
         emb = F.relu(self.e_conv1(emb))
         pointfeat_1 = torch.cat((x, emb), dim=1)
-
         x = F.relu(self.conv2(x))
         emb = F.relu(self.e_conv2(emb))
         pointfeat_2 = torch.cat((x, emb), dim=1)
