@@ -1,3 +1,4 @@
+from importlib.abc import Loader
 import torch.utils.data as data
 from PIL import Image
 import os
@@ -23,7 +24,7 @@ import cv2
 
 class PoseDataset(data.Dataset):
     def __init__(self, mode, num, add_noise, root, noise_trans, refine):
-        self.objlist = [1, 2, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15]
+        self.objlist = [0, 1, 2, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14]
         self.mode = mode
 
         self.list_rgb = []
@@ -36,13 +37,16 @@ class PoseDataset(data.Dataset):
         self.root = root
         self.noise_trans = noise_trans
         self.refine = refine
+        self.img_width = 960
+        self.img_length = 540
+
 
         item_count = 0
         for item in self.objlist:
             if self.mode == 'train':
-                input_file = open('{0}/data/{1}/train.txt'.format(self.root, '%02d' % item))
+                input_file = open('{0}/data/{1}/train.txt'.format(self.root, '%d' % item))
             else:
-                input_file = open('{0}/data/{1}/test.txt'.format(self.root, '%02d' % item))
+                input_file = open('{0}/data/{1}/test.txt'.format(self.root, '%d' % item))
             while 1:
                 item_count += 1
                 input_line = input_file.readline()
@@ -52,31 +56,33 @@ class PoseDataset(data.Dataset):
                     break
                 if input_line[-1:] == '\n':
                     input_line = input_line[:-1]
-                self.list_rgb.append('{0}/data/{1}/rgb/{2}.png'.format(self.root, '%02d' % item, input_line))
-                self.list_depth.append('{0}/data/{1}/depth/{2}.png'.format(self.root, '%02d' % item, input_line))
+                self.list_rgb.append('{0}/data/{1}/rgb/{2}.jpg'.format(self.root, '%d' % item, input_line))
+                self.list_depth.append('{0}/data/{1}/depth/{2}.png'.format(self.root, '%d' % item, input_line))
                 if self.mode == 'eval':
-                    self.list_label.append('{0}/segnet_results/{1}_label/{2}_label.png'.format(self.root, '%02d' % item, input_line))
+                    self.list_label.append('{0}/segnet_results/{1}_label/{2}_label.png'.format(self.root, '%d' % item, input_line))
                 else:
-                    self.list_label.append('{0}/data/{1}/mask/{2}.png'.format(self.root, '%02d' % item, input_line))
+                    self.list_label.append('{0}/data/{1}/mask/{2}.png'.format(self.root, '%d' % item, input_line))
                 
                 self.list_obj.append(item)
                 self.list_rank.append(int(input_line))
 
-            meta_file = open('{0}/data/{1}/gt.yml'.format(self.root, '%02d' % item), 'r')
-            self.meta[item] = yaml.load(meta_file)
-            self.pt[item] = ply_vtx('{0}/models/obj_{1}.ply'.format(self.root, '%02d' % item))
+            meta_file = open('{0}/data/{1}/gt.yml'.format(self.root, '%d' % item), 'r')
+            self.meta[item] = yaml.safe_load(meta_file)
+            self.pt[item] = npy_vtx('{0}/models/{1}.npy'.format(self.root, '%d' % item))
             
             print("Object {0} buffer loaded".format(item))
 
         self.length = len(self.list_rgb)
+        
+        # retrieved from /usr/local/zed/settings according to 
+        # https://support.stereolabs.com/hc/en-us/articles/360007497173-What-is-the-calibration-file-
+        self.cam_cx = 1080.47
+        self.cam_cy = 613.322
+        self.cam_fx = 1057.8
+        self.cam_fy = 1056.61
 
-        self.cam_cx = 325.26110
-        self.cam_cy = 242.04899
-        self.cam_fx = 572.41140
-        self.cam_fy = 573.57043
-
-        self.xmap = np.array([[j for i in range(640)] for j in range(480)])
-        self.ymap = np.array([[i for i in range(640)] for j in range(480)])
+        self.xmap = np.array([[j for i in range(540)] for j in range(960)])
+        self.ymap = np.array([[i for i in range(540)] for j in range(960)])
         
         self.num = num
         self.add_noise = add_noise
@@ -209,8 +215,8 @@ class PoseDataset(data.Dataset):
 
 
 border_list = [-1, 40, 80, 120, 160, 200, 240, 280, 320, 360, 400, 440, 480, 520, 560, 600, 640, 680]
-img_width = 480
-img_length = 640
+img_width = 960
+img_length = 540
 
 
 def mask_to_bbox(mask):
@@ -236,12 +242,12 @@ def get_bbox(bbox):
     bbx = [bbox[1], bbox[1] + bbox[3], bbox[0], bbox[0] + bbox[2]]
     if bbx[0] < 0:
         bbx[0] = 0
-    if bbx[1] >= 480:
-        bbx[1] = 479
+    if bbx[1] >= 960:
+        bbx[1] = 959
     if bbx[2] < 0:
         bbx[2] = 0
-    if bbx[3] >= 640:
-        bbx[3] = 639                
+    if bbx[3] >= 540:
+        bbx[3] = 539                
     rmin, rmax, cmin, cmax = bbx[0], bbx[1], bbx[2], bbx[3]
     r_b = rmax - rmin
     for tt in range(len(border_list)):
@@ -266,13 +272,13 @@ def get_bbox(bbox):
         delt = -cmin
         cmin = 0
         cmax += delt
-    if rmax > 480:
-        delt = rmax - 480
-        rmax = 480
+    if rmax > 960:
+        delt = rmax - 960
+        rmax = 960
         rmin -= delt
-    if cmax > 640:
-        delt = cmax - 640
-        cmax = 640
+    if cmax > 540:
+        delt = cmax - 540
+        cmax = 540
         cmin -= delt
     return rmin, rmax, cmin, cmax
 
@@ -289,3 +295,6 @@ def ply_vtx(path):
     for _ in range(N):
         pts.append(np.float32(f.readline().split()[:3]))
     return np.array(pts)
+
+def npy_vtx(path):
+    return np.load(path,allow_pickle=True)

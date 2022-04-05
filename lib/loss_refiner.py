@@ -6,7 +6,7 @@ import numpy as np
 import torch.nn as nn
 import random
 import torch.backends.cudnn as cudnn
-from lib.knn.__init__ import KNearestNeighbor
+from models.DenseFusion.lib.knn.__init__ import KNearestNeighbor
 
 
 def loss_calculation(pred_r, pred_t, target, model_points, idx, points, num_point_mesh, sym_list):
