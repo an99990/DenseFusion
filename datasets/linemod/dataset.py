@@ -90,7 +90,7 @@ class PoseDataset(data.Dataset):
         self.norm = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         self.border_list = [-1, 40, 80, 120, 160, 200, 240, 280, 320, 360, 400, 440, 480, 520, 560, 600, 640, 680]
         self.num_pt_mesh_large = 500
-        self.num_pt_mesh_small = 500
+        self.num_pt_mesh_small = 200
         self.symmetry_obj_idx = [7, 8]
 
     def __getitem__(self, index):
@@ -98,6 +98,11 @@ class PoseDataset(data.Dataset):
         ori_img = np.array(img)
         depth = np.array(Image.open(self.list_depth[index]))
         label = np.array(Image.open(self.list_label[index]))
+
+        # # removing alpha channel
+        if np.shape(label)[-1] == 4 :
+            label = label[:,:,:-1] 
+
         obj = self.list_obj[index]
         rank = self.list_rank[index]        
 
@@ -211,8 +216,6 @@ class PoseDataset(data.Dataset):
             return self.num_pt_mesh_large
         else:
             return self.num_pt_mesh_small
-
-
 
 border_list = [-1, 40, 80, 120, 160, 200, 240, 280, 320, 360, 400, 440, 480, 520, 560, 600, 640, 680]
 img_width = 960
