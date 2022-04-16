@@ -1,0 +1,6 @@
+# ninja log v5
+1	1925	1650132177455920061	/workspaces/halodi-segmentation/halodi_segmentation/models/DenseFusion/lib/knn/build/temp.linux-x86_64-3.8/workspaces/halodi-segmentation/halodi_segmentation/models/DenseFusion/lib/knn/src/cuda/knn.o	2d2c873d0e2c45d4
+1	9038	1650132184571831441	/workspaces/halodi-segmentation/halodi_segmentation/models/DenseFusion/lib/knn/build/temp.linux-x86_64-3.8/workspaces/halodi-segmentation/halodi_segmentation/models/DenseFusion/lib/knn/src/cpu/knn_cpu.o	648867c1bd7b0287
+0	1730	1650132479380570432	/opt/halodi/halodi-segmentation/halodi_segmentation/models/DenseFusion/lib/knn/build/temp.linux-x86_64-3.8/opt/halodi/halodi-segmentation/halodi_segmentation/models/DenseFusion/lib/knn/src/cuda/knn.o	75a78d27de2078a1
+0	8687	1650132486336501406	/opt/halodi/halodi-segmentation/halodi_segmentation/models/DenseFusion/lib/knn/build/temp.linux-x86_64-3.8/opt/halodi/halodi-segmentation/halodi_segmentation/models/DenseFusion/lib/knn/src/cpu/knn_cpu.o	8050b215a09b6992
+1	14754	1650145363270085648	/workspaces/halodi-segmentation/halodi_segmentation/models/DenseFusion/lib/knn/build/temp.linux-x86_64-3.8/workspaces/halodi-segmentation/halodi_segmentation/models/DenseFusion/lib/knn/src/vision.o	b554b0b26e1ec7d5
