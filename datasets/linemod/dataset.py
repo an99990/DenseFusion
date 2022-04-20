@@ -21,10 +21,12 @@ import scipy.io as scio
 import yaml
 import cv2
 
+from models.DenseFusion.datasets.linemod.utils import mask_to_bbox, get_bbox, npy_vtx
 
 class PoseDataset(data.Dataset):
     def __init__(self, mode, num, add_noise, root, noise_trans, refine):
         self.objlist = [0, 1, 2, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14]
+        self.border_list = [-1, 40, 80, 120, 160, 200, 240, 280, 320, 360, 400, 440, 480, 520, 560, 600, 640, 680]
         self.mode = mode
 
         self.list_rgb = []
@@ -37,8 +39,8 @@ class PoseDataset(data.Dataset):
         self.root = root
         self.noise_trans = noise_trans
         self.refine = refine
-        self.img_width = 960
-        self.img_length = 540
+        min = 1000
+        self.white_bit = 255
 
 
         item_count = 0
@@ -69,10 +71,14 @@ class PoseDataset(data.Dataset):
             meta_file = open('{0}/data/{1}/gt.yml'.format(self.root, '%d' % item), 'r')
             self.meta[item] = yaml.safe_load(meta_file)
             self.pt[item] = npy_vtx('{0}/models/{1}.npy'.format(self.root, '%d' % item))
+
+            if len(self.pt[item]) < min:
+                min = len(self.pt[item])
             
             print("Object {0} buffer loaded".format(item))
 
         self.length = len(self.list_rgb)
+        self.num_pt_mesh_small = min
         
         # retrieved from /usr/local/zed/settings according to 
         # https://support.stereolabs.com/hc/en-us/articles/360007497173-What-is-the-calibration-file-
@@ -81,23 +87,27 @@ class PoseDataset(data.Dataset):
         self.cam_fx = 1057.8
         self.cam_fy = 1056.61
 
-        self.xmap = np.array([[j for i in range(540)] for j in range(960)])
-        self.ymap = np.array([[i for i in range(540)] for j in range(960)])
-        
+
         self.num = num
         self.add_noise = add_noise
         self.trancolor = transforms.ColorJitter(0.2, 0.2, 0.2, 0.05)
         self.norm = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         self.border_list = [-1, 40, 80, 120, 160, 200, 240, 280, 320, 360, 400, 440, 480, 520, 560, 600, 640, 680]
         self.num_pt_mesh_large = 500
-        self.num_pt_mesh_small = 200
-        self.symmetry_obj_idx = [7, 8]
+        # self.num_pt_mesh_small = 100
+        self.symmetry_obj_idx = []
 
     def __getitem__(self, index):
         img = Image.open(self.list_rgb[index])
         ori_img = np.array(img)
         depth = np.array(Image.open(self.list_depth[index]))
         label = np.array(Image.open(self.list_label[index]))
+
+
+        self.height, self.width, _ = np.shape(img)
+
+        self.xmap = np.array([[j for i in range(self.width)] for j in range(self.height)])
+        self.ymap = np.array([[j for i in range(self.width)] for j in range(self.height)])
 
         # # removing alpha channel
         if np.shape(label)[-1] == 4 :
@@ -106,41 +116,38 @@ class PoseDataset(data.Dataset):
         obj = self.list_obj[index]
         rank = self.list_rank[index]        
 
-        if obj == 2:
-            for i in range(0, len(self.meta[obj][rank])):
-                if self.meta[obj][rank][i]['obj_id'] == 2:
-                    meta = self.meta[obj][rank][i]
-                    break
-        else:
-            meta = self.meta[obj][rank][0]
-
+        # if obj == 2:
+        #     for i in range(0, len(self.meta[obj][rank])):
+        #         if self.meta[obj][rank][i]['obj_id'] == 2:
+        #             meta = self.meta[obj][rank][i]
+        #             break
+        
+        meta = self.meta[obj][rank][0]
+        #return array of bools
         mask_depth = ma.getmaskarray(ma.masked_not_equal(depth, 0))
         if self.mode == 'eval':
-            mask_label = ma.getmaskarray(ma.masked_equal(label, np.array(255)))
+            mask_label = ma.getmaskarray(ma.masked_equal(label, np.array(self.white_bit)))
         else:
-            mask_label = ma.getmaskarray(ma.masked_equal(label, np.array([255, 255, 255])))[:, :, 0]
+            mask_label = ma.getmaskarray(ma.masked_equal(label, np.array([self.white_bit, self.white_bit, self.white_bit])))[:, :, 0]
         
         mask = mask_label * mask_depth
 
         if self.add_noise:
             img = self.trancolor(img)
 
+        # remove alpha channel
         img = np.array(img)[:, :, :3]
         img = np.transpose(img, (2, 0, 1))
         img_masked = img
 
         if self.mode == 'eval':
-            rmin, rmax, cmin, cmax = get_bbox(mask_to_bbox(mask_label))
-        else:
-            rmin, rmax, cmin, cmax = get_bbox(meta['obj_bb'])
+            rmin, rmax, cmin, cmax = get_bbox(mask_to_bbox(mask_label),self.height, self.width,self.border_list)
+        else: #obj_bb: [minX, minY, widhtOfBbx, heigthOfBbx]
+            rmin, rmax, cmin, cmax = get_bbox(meta['obj_bb'],self.height, self.width, self.border_list)
 
         img_masked = img_masked[:, rmin:rmax, cmin:cmax]
-        #p_img = np.transpose(img_masked, (1, 2, 0))
-        #scipy.misc.imsave('evaluation_result/{0}_input.png'.format(index), p_img)
-
-        target_r = np.resize(np.array(meta['cam_R_m2c']), (3, 3))
-        target_t = np.array(meta['cam_t_m2c'])
-        add_t = np.array([random.uniform(-self.noise_trans, self.noise_trans) for i in range(3)])
+        # p_img = np.transpose(img_masked, (1, 2, 0))
+        # cv2.imwrite('{0}_input.png'.format(index), p_img)
 
         choose = mask[rmin:rmax, cmin:cmax].flatten().nonzero()[0]
         if len(choose) == 0:
@@ -167,9 +174,6 @@ class PoseDataset(data.Dataset):
         cloud = np.concatenate((pt0, pt1, pt2), axis=1)
         cloud = cloud / 1000.0
 
-        if self.add_noise:
-            cloud = np.add(cloud, add_t)
-
         #fw = open('evaluation_result/{0}_cld.xyz'.format(index), 'w')
         #for it in cloud:
         #    fw.write('{0} {1} {2}\n'.format(it[0], it[1], it[2]))
@@ -179,6 +183,13 @@ class PoseDataset(data.Dataset):
         dellist = [j for j in range(0, len(model_points))]
         dellist = random.sample(dellist, len(model_points) - self.num_pt_mesh_small)
         model_points = np.delete(model_points, dellist, axis=0)
+
+        target_r = np.resize(np.array(meta['cam_R_m2c']), (3, 3))
+        target_t = np.array(meta['cam_t_m2c'])
+        add_t = np.array([random.uniform(-self.noise_trans, self.noise_trans) for i in range(3)])
+
+        if self.add_noise:
+            cloud = np.add(cloud, add_t)
 
         #fw = open('evaluation_result/{0}_model_points.xyz'.format(index), 'w')
         #for it in model_points:
@@ -198,6 +209,12 @@ class PoseDataset(data.Dataset):
         #    fw.write('{0} {1} {2}\n'.format(it[0], it[1], it[2]))
         #fw.close()
 
+        # np.shape(cloud) (500, 3)
+        # np.shape(choose) (1, 500)
+        # np.shape(img_masked) (3, 120, 80)
+        # np.shape(target) (24, 3)
+        # np.shape(model_points) (24, 3)
+  
         return torch.from_numpy(cloud.astype(np.float32)), \
                torch.LongTensor(choose.astype(np.int32)), \
                self.norm(torch.from_numpy(img_masked.astype(np.float32))), \
@@ -217,87 +234,84 @@ class PoseDataset(data.Dataset):
         else:
             return self.num_pt_mesh_small
 
-border_list = [-1, 40, 80, 120, 160, 200, 240, 280, 320, 360, 400, 440, 480, 520, 560, 600, 640, 680]
-img_width = 960
-img_length = 540
 
 
-def mask_to_bbox(mask):
-    mask = mask.astype(np.uint8)
-    contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+# def mask_to_bbox(mask):
+#     mask = mask.astype(np.uint8)
+#     contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
 
-    x = 0
-    y = 0
-    w = 0
-    h = 0
-    for contour in contours:
-        tmp_x, tmp_y, tmp_w, tmp_h = cv2.boundingRect(contour)
-        if tmp_w * tmp_h > w * h:
-            x = tmp_x
-            y = tmp_y
-            w = tmp_w
-            h = tmp_h
-    return [x, y, w, h]
+#     x = 0
+#     y = 0
+#     w = 0
+#     h = 0
+#     for contour in contours:
+#         tmp_x, tmp_y, tmp_w, tmp_h = cv2.boundingRect(contour)
+#         if tmp_w * tmp_h > w * h:
+#             x = tmp_x
+#             y = tmp_y
+#             w = tmp_w
+#             h = tmp_h
+#     return [x, y, w, h]
 
 
-def get_bbox(bbox):
-    bbx = [bbox[1], bbox[1] + bbox[3], bbox[0], bbox[0] + bbox[2]]
-    if bbx[0] < 0:
-        bbx[0] = 0
-    if bbx[1] >= 960:
-        bbx[1] = 959
-    if bbx[2] < 0:
-        bbx[2] = 0
-    if bbx[3] >= 540:
-        bbx[3] = 539                
-    rmin, rmax, cmin, cmax = bbx[0], bbx[1], bbx[2], bbx[3]
-    r_b = rmax - rmin
-    for tt in range(len(border_list)):
-        if r_b > border_list[tt] and r_b < border_list[tt + 1]:
-            r_b = border_list[tt + 1]
-            break
-    c_b = cmax - cmin
-    for tt in range(len(border_list)):
-        if c_b > border_list[tt] and c_b < border_list[tt + 1]:
-            c_b = border_list[tt + 1]
-            break
-    center = [int((rmin + rmax) / 2), int((cmin + cmax) / 2)]
-    rmin = center[0] - int(r_b / 2)
-    rmax = center[0] + int(r_b / 2)
-    cmin = center[1] - int(c_b / 2)
-    cmax = center[1] + int(c_b / 2)
-    if rmin < 0:
-        delt = -rmin
-        rmin = 0
-        rmax += delt
-    if cmin < 0:
-        delt = -cmin
-        cmin = 0
-        cmax += delt
-    if rmax > 960:
-        delt = rmax - 960
-        rmax = 960
-        rmin -= delt
-    if cmax > 540:
-        delt = cmax - 540
-        cmax = 540
-        cmin -= delt
-    return rmin, rmax, cmin, cmax
+# def get_bbox(bbox):
+#     bbx = [bbox[1], bbox[1] + bbox[3], bbox[0], bbox[0] + bbox[2]]
+#     if bbx[0] < 0:
+#         bbx[0] = 0
+#     if bbx[1] >= 540:
+#         bbx[1] = 539
+#     if bbx[2] < 0:
+#         bbx[2] = 0
+#     if bbx[3] >= 960:
+#         bbx[3] = 959                
+#     rmin, rmax, cmin, cmax = bbx[0], bbx[1], bbx[2], bbx[3]
+#     r_b = rmax - rmin
+#     for tt in range(len(border_list)):
+#         if r_b > border_list[tt] and r_b < border_list[tt + 1]:
+#             r_b = border_list[tt + 1]
+#             break
+#     c_b = cmax - cmin
+#     for tt in range(len(border_list)):
+#         if c_b > border_list[tt] and c_b < border_list[tt + 1]:
+#             c_b = border_list[tt + 1]
+#             break
+#     center = [int((rmin + rmax) / 2), int((cmin + cmax) / 2)]
+#     rmin = center[0] - int(r_b / 2)
+#     rmax = center[0] + int(r_b / 2)
+#     cmin = center[1] - int(c_b / 2)
+#     cmax = center[1] + int(c_b / 2)
+#     if rmin < 0:
+#         delt = -rmin
+#         rmin = 0
+#         rmax += delt
+#     if cmin < 0:
+#         delt = -cmin
+#         cmin = 0
+#         cmax += delt
+#     if rmax > 540:
+#         delt = rmax - 540
+#         rmax = 540
+#         rmin -= delt
+#     if cmax > 960:
+#         delt = cmax - 960
+#         cmax = 960
+#         cmin -= delt
+#     return rmin, rmax, cmin, cmax
 
 
-def ply_vtx(path):
-    f = open(path)
-    assert f.readline().strip() == "ply"
-    f.readline()
-    f.readline()
-    N = int(f.readline().split()[-1])
-    while f.readline().strip() != "end_header":
-        continue
-    pts = []
-    for _ in range(N):
-        pts.append(np.float32(f.readline().split()[:3]))
-    return np.array(pts)
+# def ply_vtx(path):
+#     f = open(path)
+#     assert f.readline().strip() == "ply"
+#     f.readline()
+#     f.readline()
+#     N = int(f.readline().split()[-1])
+#     while f.readline().strip() != "end_header":
+#         continue
+#     pts = []
+#     for _ in range(N):
+#         pts.append(np.float32(f.readline().split()[:3]))
+#     return np.array(pts)
 
-def npy_vtx(path):
-    return np.load(path,allow_pickle=True)
+# def npy_vtx(path):
+#     return np.load(path,allow_pickle=True)
